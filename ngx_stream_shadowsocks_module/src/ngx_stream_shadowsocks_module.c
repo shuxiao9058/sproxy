@@ -9,6 +9,8 @@
 /**********************************/
 typedef struct _ngx_stream_shadowsocks_srv_conf_s {
     ngx_flag_t shadowsocks;
+    ngx_str_t method;
+    ngx_str_t password;
 } ngx_stream_shadowsocks_srv_conf_t;
 
 
@@ -34,6 +36,18 @@ static ngx_command_t  ngx_stream_shadowsocks_commands[] = {
         ngx_conf_set_flag_slot,
         NGX_STREAM_SRV_CONF_OFFSET,
         offsetof(ngx_stream_shadowsocks_srv_conf_t, shadowsocks),
+        NULL},
+    { ngx_string("shadowsocks_method"),
+        NGX_STREAM_SRV_CONF|NGX_CONF_FLAG,
+        ngx_conf_set_str_slot,
+        NGX_STREAM_SRV_CONF_OFFSET,
+        offsetof(ngx_stream_shadowsocks_srv_conf_t, method),
+        NULL},
+    { ngx_string("shadowsocks_password"),
+        NGX_STREAM_SRV_CONF|NGX_CONF_FLAG,
+        ngx_conf_set_str_slot,
+        NGX_STREAM_SRV_CONF_OFFSET,
+        offsetof(ngx_stream_shadowsocks_srv_conf_t, password),
         NULL},
 };
 
