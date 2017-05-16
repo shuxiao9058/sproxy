@@ -1,15 +1,19 @@
 ngx_addon_name=ngx_stream_shadowsocks_module
+ngx_feature_libs="-lsodium"
 
 if test -n "$ngx_module_link"; then
     ngx_module_type=STREAM
     ngx_module_name=ngx_stream_shadowsocks_module
-    ngx_module_srcs="$ngx_addon_dir/src/ngx_stream_shadowsocks_module.c"
+    ngx_module_srcs="$ngx_addon_dir/src/ngx_stream_shadowsocks_module.c \
+        $ngx_addon_dir/src/ngx_stream_shadowsocks_encrypt.c"
     ngx_module_incs="$ngx_addon_dir/src/"
+    ngx_module_libs="/usr/lib/libsodium.so"
 
     . auto/module
 else
     STREAM_MODULES="$STREAM_MODULES ${ngx_addon_name}"
-    NGX_ADDON_SRCS="$NGX_ADDON_SRCS $ngx_addon_dir/src/ngx_stream_shadowsocks_module.c"
+    NGX_ADDON_SRCS="$NGX_ADDON_SRCS $ngx_addon_dir/src/ngx_stream_shadowsocks_module.c \
+        $ngx_addon_dir/src/ngx_stream_shadowsocks_encrypt.c"
     STREAM_INCS="$STREAM_INCS $ngx_addon_dir/src/"
 fi
 

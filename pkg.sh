@@ -24,6 +24,7 @@ cd $BUILDROOT/nginx-${NGINX_VERSION}/
 CFLAGS="-g -O0" ./configure --prefix=${DESTDIR} \
     --without-http \
     --with-stream \
+    --with-stream_ssl_module \
     --add-dynamic-module=../ngx_stream_shadowsocks_module/ || exit -1
 
 make -j 2 $build_what || exit -1

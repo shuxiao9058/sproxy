@@ -4,6 +4,8 @@
 #include <ngx_core.h>
 #include <ngx_stream.h>
 
+#include <openssl/evp.h>
+
 /**********************************/
 /***  Definitions                **/
 /**********************************/
@@ -12,6 +14,10 @@ typedef struct _ngx_stream_shadowsocks_srv_conf_s {
     ngx_str_t method;
     ngx_str_t password;
 } ngx_stream_shadowsocks_srv_conf_t;
+
+typedef struct _ngx_stream_shadowsocks_ctx_s {
+    EVP_CIPHER_CTX *cipher;
+} ngx_stream_shadowsocks_ctx_t;
 
 
 static ngx_int_t ngx_stream_shadowsocks_addr_variable(ngx_stream_session_t *s,
@@ -26,6 +32,47 @@ static void * ngx_stream_shadowsocks_create_srv_conf(ngx_conf_t *cf);
 static ngx_int_t ngx_stream_shadowsocks_content_handler(ngx_stream_session_t *s);
 static void ngx_stream_shadowsocks_read_handler(ngx_event_t *ev);
 
+/**********************************/
+/***  Show HexCode               **/
+/**********************************/
+static void show_line(const uint8_t *data, size_t len)
+{
+    size_t i;
+    char line[BUFSIZ];
+
+    for (i = 0; i < len; i ++) {
+        sprintf(line + (i*3), " %02X", data[i]);
+        //printf(" %02X", data[i]);
+    }
+    for (; i < 16; i ++) {
+        sprintf(line + (i*3), "   ");
+        //printf("   ");
+    }
+    sprintf(line+ (16*3), "%s", "    ");
+    //printf("\t");
+
+    for (i = 0; i < len; i ++) {
+        if (data[i] >= ' ' && data[i] < 128) {
+            sprintf(line + 52 + i, "%c", data[i]);
+            //printf("%c", data[i]);
+        } else {
+            sprintf(line + 52 + i, "%c", '.');
+        }
+    }
+
+    ngx_log_error(NGX_LOG_ERR, ngx_cycle->log, 0, "%s", line);
+}
+
+void show_hex(const void *data, size_t len)
+{
+    const uint8_t *t = (uint8_t*)data;
+    while (len > 16) {
+        show_line(t, 16);
+        t += 16;
+        len -= 16;
+    }
+    show_line(t, len);
+}
 
 /**********************************/
 /**********************************/
@@ -183,6 +230,66 @@ static ngx_int_t ngx_stream_shadowsocks_content_handler(ngx_stream_session_t *s)
 }
 
 
+static ngx_stream_shadowsocks_ctx_t *ngx_stream_shadowsocks_new_ctx(ngx_pool_t *pool,
+        const char *key, const char *iv)
+{
+    ngx_stream_shadowsocks_ctx_t *ctx;
+    if ((ctx = ngx_palloc(pool, sizeof(ngx_stream_shadowsocks_ctx_t))) == NULL) {
+        return NULL;
+    }
+    if ((ctx->cipher = EVP_CIPHER_CTX_new()) == NULL) {
+        return NULL;
+    }
+
+    ngx_log_error(NGX_LOG_ERR, ngx_cycle->log, 0, "[%s:%d] key: %s, iv: %s",
+            __FUNCTION__, __LINE__, key, iv);
+
+    if (1 != EVP_DecryptInit_ex(ctx->cipher, EVP_aes_256_cfb(), NULL, key, iv)) {
+        return NULL;
+    }
+    return ctx;
+}
+
+static ngx_int_t ngx_stream_shadowsocks_decrypt(ngx_stream_session_t *s, char *buff, size_t len)
+{
+    ngx_stream_shadowsocks_srv_conf_t *sscf;
+    ngx_stream_shadowsocks_ctx_t *ctx;
+    ngx_connection_t         *c;
+
+    c = s->connection;
+
+    ngx_log_error(NGX_LOG_ERR, c->log, 0, "[%s:%d]", __FUNCTION__, __LINE__);
+
+    if ((ctx = ngx_stream_get_module_ctx(s, ngx_stream_shadowsocks_module)) == NULL) {
+        sscf = ngx_stream_get_module_srv_conf(s, ngx_stream_shadowsocks_module);
+        char key[BUFSIZ];
+        char *iv = "ss-iv";
+
+        memset(key, 0, sizeof(key));
+        //snprintf(key, sscf->password.len+1, "%s", sscf->password.data);
+        memcpy(key, sscf->password.data, sscf->password.len);
+
+        ngx_log_error(NGX_LOG_ERR, c->log, 0, "[%s:%d] password %V",
+                __FUNCTION__, __LINE__, &sscf->password);
+
+        if ((ctx = ngx_stream_shadowsocks_new_ctx(c->pool, key, iv)) == NULL) {
+            return NGX_ERROR;
+        }
+
+        ngx_stream_set_ctx(s, ctx, ngx_stream_shadowsocks_module);
+    }
+
+    char plaintext[BUFSIZ];
+    int plaintext_len;
+
+    if(1 != EVP_DecryptUpdate(ctx->cipher, plaintext, &plaintext_len, buff, len)) {
+        return NGX_ERROR;
+    }
+    show_hex(plaintext, plaintext_len);
+    return NGX_OK;
+}
+
+
 static void ngx_stream_shadowsocks_read_handler(ngx_event_t *ev)
 {
     char buff[BUFSIZ];
@@ -201,8 +308,10 @@ static void ngx_stream_shadowsocks_read_handler(ngx_event_t *ev)
             ngx_stream_finalize_session(s, NGX_STREAM_BAD_REQUEST);
             return;
         }
-        ngx_log_error(NGX_LOG_ERR, ev->log, 0, "[%s:%d] %s",
-                __FUNCTION__, __LINE__, buff);
+        //ngx_log_error(NGX_LOG_ERR, ev->log, 0, "[%s:%d] %s",
+        //        __FUNCTION__, __LINE__, buff);
+        show_hex(buff, ret);
+        ngx_stream_shadowsocks_decrypt(s, buff, ret);
     }
 }
 
