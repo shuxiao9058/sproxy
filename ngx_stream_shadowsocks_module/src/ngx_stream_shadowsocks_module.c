@@ -6,6 +6,8 @@
 
 #include <openssl/evp.h>
 
+#include "ngx_stream_shadowsocks_encrypt.h"
+
 /**********************************/
 /***  Definitions                **/
 /**********************************/

@@ -19,16 +19,12 @@
  * along with shadowsocks-libev; see the file COPYING. If not, see
  * <http://www.gnu.org/licenses/>.
  */
-#ifdef __cplusplus
-extern "C" {
-#endif
 #include <string.h>
 #include <stdlib.h>
 #include <stdio.h>
 #include <stdint.h>
 
 #include <openssl/evp.h>
-//#include "system.h"
 
 typedef EVP_CIPHER cipher_kt_t;
 typedef EVP_CIPHER_CTX cipher_evp_t;
@@ -42,12 +38,6 @@ typedef struct {
     cipher_evp_t evp;
     uint8_t iv[MAX_IV_LENGTH];
 } cipher_ctx_t;
-
-#ifdef HAVE_STDINT_H
-#include <stdint.h>
-#elif HAVE_INTTYPES_H
-#include <inttypes.h>
-#endif
 
 #define SODIUM_BLOCK_SIZE   64
 #define CIPHER_NUM          17
@@ -73,26 +63,49 @@ typedef struct {
 
 #define min(a, b) (((a) < (b)) ? (a) : (b))
 #define max(a, b) (((a) > (b)) ? (a) : (b))
-//#define DEBUG 1
 
+
+/*************************************************************************/
+/**   请求相关的结构&函数                                               **/
+/*************************************************************************/
+
+/**
+ * 每个请求需要两个enc_ctx:
+ *       一个用来加密数据
+ *       一个用来解密数据
+ **/
 struct enc_ctx {
     uint8_t init;
     uint64_t counter;
     cipher_ctx_t evp;
 };
 
-char * ss_encrypt_all(int buf_size, char *plaintext, ssize_t *len, int method);
-char * ss_decrypt_all(int buf_size, char *ciphertext, ssize_t *len, int method);
-char * ss_encrypt(int buf_size, char *plaintext, ssize_t *len,
-                  struct enc_ctx *ctx);
-char * ss_decrypt(int buf_size, char *ciphertext, ssize_t *len,
-                  struct enc_ctx *ctx);
-void enc_ctx_init(int method, struct enc_ctx *ctx, int enc);
-int enc_init(const char *pass, const char *method);
-int enc_get_iv_len(void);
-void cipher_context_release(cipher_ctx_t *evp);
-unsigned char *enc_md5(const unsigned char *d, size_t n, unsigned char *md);
-int rand_bytes(uint8_t *output, int len);
-#ifdef __cplusplus
-}
-#endif
+typedef struct _shadowsocks_s shadowsocks_t;
+
+void enc_ctx_init(shadowsocks_t *ss, int method, struct enc_ctx *ctx, int enc);
+void cipher_context_release(shadowsocks_t *ss, cipher_ctx_t *ctx);
+
+char * ss_encrypt(shadowsocks_t *ss, int buf_size, char *plaintext,
+        ssize_t *len, struct enc_ctx *ctx);
+char * ss_decrypt(shadowsocks_t *ss, int buf_size, char *ciphertext,
+        ssize_t *len, struct enc_ctx *ctx);
+
+/*************************************************************************/
+/**   Server相关的结构&函数                                             **/
+/*************************************************************************/
+struct _shadowsocks_s {
+    uint8_t enc_table[256];
+    uint8_t dec_table[256];
+    uint8_t enc_key[MAX_KEY_LENGTH];
+    int enc_key_len;
+    int enc_iv_len;
+    int enc_method;
+};
+
+int enc_init(shadowsocks_t *ss, const char *pass, const char *method);
+
+/*************************************************************************/
+/**   全局相关的结构&函数                                               **/
+/*************************************************************************/
+int global_init(void);
+

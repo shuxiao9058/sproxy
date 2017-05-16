@@ -38,27 +38,8 @@
 
 #define LOGE(...)
 
-static uint8_t *enc_table;
-static uint8_t *dec_table;
-static uint8_t enc_key[MAX_KEY_LENGTH];
-static int enc_key_len;
-static int enc_iv_len;
-static int enc_method;
 
-#ifdef DEBUG
-static void dump(char *tag, char *text, int len)
-{
-    int i;
-    char *result = malloc(len + 20);
-    sprintf(result,"%s: ", tag);
-    for (i = 0; i < len; i++) {
-        sprintf(result,"0x%02x ", (uint8_t)text[i]);
-    }
-    LOGE("%s", result);
-}
-#endif
-
-void FATAL(const char *msg)
+static void FATAL(const char *msg)
 {
     LOGE("%s", msg);
     exit(-1);
@@ -96,21 +77,21 @@ static const int supported_ciphers_key_size[CIPHER_NUM] =
 };
 
 static int crypto_stream_xor_ic(uint8_t *c, const uint8_t *m, uint64_t mlen,
-                                const uint8_t *n, uint64_t ic, const uint8_t *k,
-                                int method)
+        const uint8_t *n, uint64_t ic, const uint8_t *k,
+        int method)
 {
     switch (method) {
-    case SALSA20:
-        return crypto_stream_salsa20_xor_ic(c, m, mlen, n, ic, k);
-    case CHACHA20:
-        return crypto_stream_chacha20_xor_ic(c, m, mlen, n, ic, k);
+        case SALSA20:
+            return crypto_stream_salsa20_xor_ic(c, m, mlen, n, ic, k);
+        case CHACHA20:
+            return crypto_stream_chacha20_xor_ic(c, m, mlen, n, ic, k);
     }
     // always return 0
     return 0;
 }
 
 static int random_compare(const void *_x, const void *_y, uint32_t i,
-                          uint64_t a)
+        uint64_t a)
 {
     uint8_t x = *((uint8_t *)_x);
     uint8_t y = *((uint8_t *)_y);
@@ -118,7 +99,7 @@ static int random_compare(const void *_x, const void *_y, uint32_t i,
 }
 
 static void merge(uint8_t *left, int llength, uint8_t *right,
-                  int rlength, uint32_t salt, uint64_t key)
+        int rlength, uint32_t salt, uint64_t key)
 {
     uint8_t *ltmp = (uint8_t *)malloc(llength * sizeof(uint8_t));
     uint8_t *rtmp = (uint8_t *)malloc(rlength * sizeof(uint8_t));
@@ -165,7 +146,7 @@ static void merge(uint8_t *left, int llength, uint8_t *right,
 }
 
 static void merge_sort(uint8_t array[], int length,
-                       uint32_t salt, uint64_t key)
+        uint32_t salt, uint64_t key)
 {
     uint8_t middle;
     uint8_t *left, *right;
@@ -187,24 +168,16 @@ static void merge_sort(uint8_t array[], int length,
     merge(left, llength, right, middle, salt, key);
 }
 
-int enc_get_iv_len()
-{
-    return enc_iv_len;
-}
-
-unsigned char *enc_md5(const unsigned char *d, size_t n, unsigned char *md)
+static unsigned char *enc_md5(const unsigned char *d, size_t n, unsigned char *md)
 {
     return MD5(d, n, md);
 }
 
-void enc_table_init(const char *pass)
+static void enc_table_init(shadowsocks_t *ss, const char *pass)
 {
     uint32_t i;
     uint64_t key = 0;
     uint8_t *digest;
-
-    enc_table = malloc(256);
-    dec_table = malloc(256);
 
     digest = enc_md5((const uint8_t *)pass, strlen(pass), NULL);
 
@@ -213,14 +186,14 @@ void enc_table_init(const char *pass)
     }
 
     for (i = 0; i < 256; ++i) {
-        enc_table[i] = i;
+        ss->enc_table[i] = i;
     }
     for (i = 1; i < 1024; ++i) {
-        merge_sort(enc_table, 256, i, key);
+        merge_sort(ss->enc_table, 256, i, key);
     }
     for (i = 0; i < 256; ++i) {
         // gen decrypt table from encrypt table
-        dec_table[enc_table[i]] = i;
+        ss->dec_table[ss->enc_table[i]] = i;
     }
 }
 
@@ -229,25 +202,20 @@ int cipher_iv_size(const cipher_kt_t *cipher)
     return EVP_CIPHER_iv_length(cipher);
 }
 
-int cipher_key_size(const cipher_kt_t *cipher)
-{
-    return EVP_CIPHER_key_length(cipher);
-}
-
-int bytes_to_key(const cipher_kt_t *cipher, const digest_type_t *md,
-                 const uint8_t *pass, uint8_t *key, uint8_t *iv)
+static int bytes_to_key(const cipher_kt_t *cipher, const digest_type_t *md,
+        const uint8_t *pass, uint8_t *key, uint8_t *iv)
 {
     size_t datal;
     datal = strlen((const char *)pass);
     return EVP_BytesToKey(cipher, md, NULL, pass, datal, 1, key, iv);
 }
 
-int rand_bytes(uint8_t *output, int len)
+static int rand_bytes(uint8_t *output, int len)
 {
     return RAND_bytes(output, len);
 }
 
-const cipher_kt_t *get_cipher_type(int method)
+static const cipher_kt_t *get_cipher_type(int method)
 {
     if (method <= TABLE || method >= CIPHER_NUM) {
         LOGE("get_cipher_type(): Illegal method");
@@ -266,7 +234,7 @@ const cipher_kt_t *get_cipher_type(int method)
     return EVP_get_cipherbyname(ciphername);
 }
 
-const digest_type_t *get_digest_type(const char *digest)
+static const digest_type_t *get_digest_type(const char *digest)
 {
     if (digest == NULL) {
         LOGE("get_digest_type(): Digest name is null");
@@ -276,7 +244,7 @@ const digest_type_t *get_digest_type(const char *digest)
     return EVP_get_digestbyname(digest);
 }
 
-void cipher_context_init(cipher_ctx_t *ctx, int method, int enc)
+static void cipher_context_init(shadowsocks_t *ss, cipher_ctx_t *ctx, int method, int enc)
 {
     if (method <= TABLE || method >= CIPHER_NUM) {
         LOGE("cipher_context_init(): Illegal method");
@@ -284,7 +252,7 @@ void cipher_context_init(cipher_ctx_t *ctx, int method, int enc)
     }
 
     if (method >= SALSA20) {
-        enc_iv_len = supported_ciphers_iv_size[method];
+        ss->enc_iv_len = supported_ciphers_iv_size[method];
         return;
     }
 
@@ -300,9 +268,9 @@ void cipher_context_init(cipher_ctx_t *ctx, int method, int enc)
         LOGE("Cannot initialize cipher %s", ciphername);
         exit(EXIT_FAILURE);
     }
-    if (!EVP_CIPHER_CTX_set_key_length(evp, enc_key_len)) {
+    if (!EVP_CIPHER_CTX_set_key_length(evp, ss->enc_key_len)) {
         EVP_CIPHER_CTX_cleanup(evp);
-        LOGE("Invalid key length: %d", enc_key_len);
+        LOGE("Invalid key length: %d", ss->enc_key_len);
         exit(EXIT_FAILURE);
     }
     if (method > RC4_MD5) {
@@ -310,8 +278,8 @@ void cipher_context_init(cipher_ctx_t *ctx, int method, int enc)
     }
 }
 
-void cipher_context_set_iv(cipher_ctx_t *ctx, uint8_t *iv, size_t iv_len,
-                           int enc)
+static void cipher_context_set_iv(shadowsocks_t *ss, cipher_ctx_t *ctx,
+        uint8_t *iv, size_t iv_len, int enc)
 {
     const unsigned char *true_key;
 
@@ -324,19 +292,19 @@ void cipher_context_set_iv(cipher_ctx_t *ctx, uint8_t *iv, size_t iv_len,
         rand_bytes(iv, iv_len);
     }
 
-    if (enc_method >= SALSA20) {
+    if (ss->enc_method >= SALSA20) {
         memcpy(ctx->iv, iv, iv_len);
         return;
     }
 
-    if (enc_method == RC4_MD5) {
+    if (ss->enc_method == RC4_MD5) {
         unsigned char key_iv[32];
-        memcpy(key_iv, enc_key, 16);
+        memcpy(key_iv, ss->enc_key, 16);
         memcpy(key_iv + 16, iv, 16);
         true_key = enc_md5(key_iv, 32, NULL);
         iv_len = 0;
     } else {
-        true_key = enc_key;
+        true_key = ss->enc_key;
     }
 
     cipher_evp_t *evp = &ctx->evp;
@@ -348,15 +316,11 @@ void cipher_context_set_iv(cipher_ctx_t *ctx, uint8_t *iv, size_t iv_len,
         EVP_CIPHER_CTX_cleanup(evp);
         FATAL("Cannot set key and IV");
     }
-
-#ifdef DEBUG
-    LOGE("real iv use is %s , len is %d", (char *)iv, iv_len);
-#endif
 }
 
-void cipher_context_release(cipher_ctx_t *ctx)
+void cipher_context_release(shadowsocks_t *ss, cipher_ctx_t *ctx)
 {
-    if (enc_method >= SALSA20) {
+    if (ss->enc_method >= SALSA20) {
         return;
     }
 
@@ -365,79 +329,15 @@ void cipher_context_release(cipher_ctx_t *ctx)
 }
 
 static int cipher_context_update(cipher_ctx_t *ctx, uint8_t *output, int *olen,
-                                 const uint8_t *input, int ilen)
+        const uint8_t *input, int ilen)
 {
     cipher_evp_t *evp = &ctx->evp;
     return EVP_CipherUpdate(evp, (uint8_t *)output, olen,
-                            (const uint8_t *)input, (size_t)ilen);
+            (const uint8_t *)input, (size_t)ilen);
 }
 
-char * ss_encrypt_all(int buf_size, char *plaintext, ssize_t *len, int method)
-{
-    if (method > TABLE) {
-        cipher_ctx_t evp;
-        cipher_context_init(&evp, method, 1);
-
-        int p_len = *len, c_len = *len;
-        int iv_len = enc_iv_len;
-        int err = 1;
-
-        static int tmp_len = 0;
-        static char *tmp_buf = NULL;
-        int buf_len = max(iv_len + c_len, buf_size);
-        if (tmp_len < buf_len) {
-            tmp_len = buf_len;
-            tmp_buf = realloc(tmp_buf, buf_len);
-        }
-        char *ciphertext = tmp_buf;
-
-        uint8_t iv[MAX_IV_LENGTH];
-        cipher_context_set_iv(&evp, iv, iv_len, 1);
-        memcpy(ciphertext, iv, iv_len);
-
-        if (method >= SALSA20) {
-            crypto_stream_xor_ic((uint8_t *)(ciphertext + iv_len),
-                                 (const uint8_t *)plaintext, (uint64_t)(p_len),
-                                 (const uint8_t *)iv,
-                                 0, enc_key, method);
-        } else {
-            err = cipher_context_update(&evp, (uint8_t *)(ciphertext + iv_len),
-                                        &c_len, (const uint8_t *)plaintext,
-                                        p_len);
-        }
-
-        if (!err) {
-            free(plaintext);
-            cipher_context_release(&evp);
-            return NULL;
-        }
-
-#ifdef DEBUG
-        dump("PLAIN", plaintext, *len);
-        dump("CIPHER", ciphertext + iv_len, c_len);
-#endif
-
-        cipher_context_release(&evp);
-
-        if (*len < iv_len + c_len) {
-            plaintext = realloc(plaintext, max(iv_len + c_len, buf_size));
-        }
-        *len = iv_len + c_len;
-        memcpy(plaintext, ciphertext, *len);
-
-        return plaintext;
-    } else {
-        char *begin = plaintext;
-        while (plaintext < begin + *len) {
-            *plaintext = (char)enc_table[(uint8_t)*plaintext];
-            plaintext++;
-        }
-        return begin;
-    }
-}
-
-char * ss_encrypt(int buf_size, char *plaintext, ssize_t *len,
-                  struct enc_ctx *ctx)
+char * ss_encrypt(shadowsocks_t *ss, int buf_size, char *plaintext,
+        ssize_t *len, struct enc_ctx *ctx)
 {
     if (ctx != NULL) {
         static int tmp_len = 0;
@@ -447,7 +347,7 @@ char * ss_encrypt(int buf_size, char *plaintext, ssize_t *len,
         int iv_len = 0;
         int p_len = *len, c_len = *len;
         if (!ctx->init) {
-            iv_len = enc_iv_len;
+            iv_len = ss->enc_iv_len;
         }
 
         int buf_len = max(iv_len + c_len, buf_size);
@@ -459,13 +359,13 @@ char * ss_encrypt(int buf_size, char *plaintext, ssize_t *len,
 
         if (!ctx->init) {
             uint8_t iv[MAX_IV_LENGTH];
-            cipher_context_set_iv(&ctx->evp, iv, enc_iv_len, 1);
+            cipher_context_set_iv(ss, &ctx->evp, iv, ss->enc_iv_len, 1);
             memcpy(ciphertext, iv, iv_len);
             ctx->counter = 0;
             ctx->init = 1;
         }
 
-        if (enc_method >= SALSA20) {
+        if (ss->enc_method >= SALSA20) {
             int padding = ctx->counter % SODIUM_BLOCK_SIZE;
             if (buf_len < iv_len + padding + c_len) {
                 buf_len = max(iv_len + (padding + c_len) * 2, buf_size);
@@ -479,118 +379,45 @@ char * ss_encrypt(int buf_size, char *plaintext, ssize_t *len,
                 memset(plaintext, 0, padding);
             }
             crypto_stream_xor_ic((uint8_t *)(ciphertext + iv_len),
-                                 (const uint8_t *)plaintext,
-                                 (uint64_t)(p_len + padding),
-                                 (const uint8_t *)ctx->evp.iv,
-                                 ctx->counter / SODIUM_BLOCK_SIZE, enc_key,
-                                 enc_method);
+                    (const uint8_t *)plaintext,
+                    (uint64_t)(p_len + padding),
+                    (const uint8_t *)ctx->evp.iv,
+                    ctx->counter / SODIUM_BLOCK_SIZE, ss->enc_key,
+                    ss->enc_method);
             ctx->counter += p_len;
             if (padding) {
                 memmove(ciphertext + iv_len, ciphertext + iv_len + padding,
                         c_len);
             }
         } else {
-            err =
-                cipher_context_update(&ctx->evp,
-                                      (uint8_t *)(ciphertext + iv_len),
-                                      &c_len, (const uint8_t *)plaintext,
-                                      p_len);
+            err = cipher_context_update(&ctx->evp,
+                    (uint8_t *)(ciphertext + iv_len),
+                    &c_len, (const uint8_t *)plaintext,
+                    p_len);
             if (!err) {
                 free(plaintext);
                 return NULL;
             }
         }
 
-#ifdef DEBUG
-        LOGE("PLAIN text is %s, len is %d", plaintext, p_len);
-        LOGE("CIPHER text is %s, len is %d", ciphertext + iv_len, c_len);
-#endif
-
         if (*len < iv_len + c_len) {
             plaintext = realloc(plaintext, max(iv_len + c_len, buf_size));
         }
         *len = iv_len + c_len;
         memcpy(plaintext, ciphertext, *len);
-#ifdef DEBUG
-        LOGE("RESULT text is %s len is %d",plaintext, *len);
-//        LOGE("IV is %s",iv);
-#endif
         return plaintext;
     } else {
         char *begin = plaintext;
         while (plaintext < begin + *len) {
-            *plaintext = (char)enc_table[(uint8_t)*plaintext];
+            *plaintext = (char)ss->enc_table[(uint8_t)*plaintext];
             plaintext++;
         }
         return begin;
     }
 }
 
-char * ss_decrypt_all(int buf_size, char *ciphertext, ssize_t *len, int method)
-{
-    if (method > TABLE) {
-        cipher_ctx_t evp;
-        cipher_context_init(&evp, method, 0);
-        int c_len = *len, p_len = *len;
-        int iv_len = enc_iv_len;
-        int err = 1;
-
-        static int tmp_len = 0;
-        static char *tmp_buf = NULL;
-        int buf_len = max(p_len, buf_size);
-        if (tmp_len < buf_len) {
-            tmp_len = buf_len;
-            tmp_buf = realloc(tmp_buf, buf_len);
-        }
-        char *plaintext = tmp_buf;
-
-        uint8_t iv[MAX_IV_LENGTH];
-        memcpy(iv, ciphertext, iv_len);
-        cipher_context_set_iv(&evp, iv, iv_len, 0);
-
-        if (method >= SALSA20) {
-            crypto_stream_xor_ic((uint8_t *)plaintext,
-                                 (const uint8_t *)(ciphertext + iv_len),
-                                 (uint64_t)(c_len - iv_len),
-                                 (const uint8_t *)iv, 0, enc_key, method);
-        } else {
-            err = cipher_context_update(&evp, (uint8_t *)plaintext, &p_len,
-                                        (const uint8_t *)(ciphertext + iv_len),
-                                        c_len - iv_len);
-        }
-
-        if (!err) {
-            free(ciphertext);
-            cipher_context_release(&evp);
-            return NULL;
-        }
-
-#ifdef DEBUG
-        dump("PLAIN", plaintext, p_len);
-        dump("CIPHER", ciphertext + iv_len, c_len - iv_len);
-#endif
-
-        cipher_context_release(&evp);
-
-        if (*len < p_len) {
-            ciphertext = realloc(ciphertext, max(p_len, buf_size));
-        }
-        *len = p_len;
-        memcpy(ciphertext, plaintext, *len);
-
-        return ciphertext;
-    } else {
-        char *begin = ciphertext;
-        while (ciphertext < begin + *len) {
-            *ciphertext = (char)dec_table[(uint8_t)*ciphertext];
-            ciphertext++;
-        }
-        return begin;
-    }
-}
-
-char * ss_decrypt(int buf_size, char *ciphertext, ssize_t *len,
-                  struct enc_ctx *ctx)
+char * ss_decrypt(shadowsocks_t *ss, int buf_size, char *ciphertext,
+        ssize_t *len, struct enc_ctx *ctx)
 {
     if (ctx != NULL) {
         static int tmp_len = 0;
@@ -609,15 +436,15 @@ char * ss_decrypt(int buf_size, char *ciphertext, ssize_t *len,
 
         if (!ctx->init) {
             uint8_t iv[MAX_IV_LENGTH];
-            iv_len = enc_iv_len;
+            iv_len = ss->enc_iv_len;
             p_len -= iv_len;
             memcpy(iv, ciphertext, iv_len);
-            cipher_context_set_iv(&ctx->evp, iv, enc_iv_len, 0);
+            cipher_context_set_iv(ss, &ctx->evp, iv, ss->enc_iv_len, 0);
             ctx->counter = 0;
             ctx->init = 1;
         }
 
-        if (enc_method >= SALSA20) {
+        if (ss->enc_method >= SALSA20) {
             int padding = ctx->counter % SODIUM_BLOCK_SIZE;
             if (buf_len < (p_len + padding) * 2) {
                 buf_len = max((p_len + padding) * 2, buf_size);
@@ -633,19 +460,19 @@ char * ss_decrypt(int buf_size, char *ciphertext, ssize_t *len,
                 memset(ciphertext + iv_len, 0, padding);
             }
             crypto_stream_xor_ic((uint8_t *)plaintext,
-                                 (const uint8_t *)(ciphertext + iv_len),
-                                 (uint64_t)(c_len - iv_len + padding),
-                                 (const uint8_t *)ctx->evp.iv,
-                                 ctx->counter / SODIUM_BLOCK_SIZE, enc_key,
-                                 enc_method);
+                    (const uint8_t *)(ciphertext + iv_len),
+                    (uint64_t)(c_len - iv_len + padding),
+                    (const uint8_t *)ctx->evp.iv,
+                    ctx->counter / SODIUM_BLOCK_SIZE, ss->enc_key,
+                    ss->enc_method);
             ctx->counter += c_len - iv_len;
             if (padding) {
                 memmove(plaintext, plaintext + padding, p_len);
             }
         } else {
             err = cipher_context_update(&ctx->evp, (uint8_t *)plaintext, &p_len,
-                                        (const uint8_t *)(ciphertext + iv_len),
-                                        c_len - iv_len);
+                    (const uint8_t *)(ciphertext + iv_len),
+                    c_len - iv_len);
         }
 
         if (!err) {
@@ -653,44 +480,34 @@ char * ss_decrypt(int buf_size, char *ciphertext, ssize_t *len,
             return NULL;
         }
 
-#ifdef DEBUG
-        LOGE("d PLAIN text is %s, length is %d", plaintext, p_len);
-        LOGE("d CIPHER text is %s, length is %d", ciphertext + iv_len, c_len - iv_len);
-#endif
-
         if (*len < p_len) {
             ciphertext = realloc(ciphertext, max(p_len, buf_size));
         }
         *len = p_len;
         memcpy(ciphertext, plaintext, *len);
-#ifdef DEBUG
-        LOGE("final len is %d", *len);
-#endif
         return ciphertext;
     } else {
         char *begin = ciphertext;
         while (ciphertext < begin + *len) {
-            *ciphertext = (char)dec_table[(uint8_t)*ciphertext];
+            *ciphertext = (char)ss->dec_table[(uint8_t)*ciphertext];
             ciphertext++;
         }
         return begin;
     }
 }
 
-void enc_ctx_init(int method, struct enc_ctx *ctx, int enc)
+void enc_ctx_init(shadowsocks_t *ss, int method, struct enc_ctx *ctx, int enc)
 {
     memset(ctx, 0, sizeof(struct enc_ctx));
-    cipher_context_init(&ctx->evp, method, enc);
+    cipher_context_init(ss, &ctx->evp, method, enc);
 }
 
-void enc_key_init(int method, const char *pass)
+static void enc_key_init(shadowsocks_t *ss, int method, const char *pass)
 {
     if (method <= TABLE || method >= CIPHER_NUM) {
         LOGE("enc_key_init(): Illegal method");
         return;
     }
-
-    OpenSSL_add_all_algorithms();
 
     uint8_t iv[MAX_IV_LENGTH];
 
@@ -698,9 +515,6 @@ void enc_key_init(int method, const char *pass)
     cipher_kt_t cipher_info;
 
     if (method == SALSA20 || method == CHACHA20) {
-        if (sodium_init() == -1) {
-            FATAL("Failed to initialize sodium");
-        }
         // Fake cipher
         cipher = (cipher_kt_t *)&cipher_info;
         cipher->key_len = supported_ciphers_key_size[method];
@@ -712,7 +526,7 @@ void enc_key_init(int method, const char *pass)
     if (cipher == NULL) {
         do {
             LOGE("Cipher %s not found in crypto library",
-                 supported_ciphers[method]);
+                    supported_ciphers[method]);
             FATAL("Cannot initialize cipher");
         } while (0);
     }
@@ -722,19 +536,19 @@ void enc_key_init(int method, const char *pass)
         FATAL("MD5 Digest not found in crypto library");
     }
 
-    enc_key_len = bytes_to_key(cipher, md, (const uint8_t *)pass, enc_key, iv);
-    if (enc_key_len == 0) {
+    ss->enc_key_len = bytes_to_key(cipher, md, (const uint8_t *)pass, ss->enc_key, iv);
+    if (ss->enc_key_len == 0) {
         FATAL("Cannot generate key and IV");
     }
     if (method == RC4_MD5) {
-        enc_iv_len = 16;
+        ss->enc_iv_len = 16;
     } else {
-        enc_iv_len = cipher_iv_size(cipher);
+        ss->enc_iv_len = cipher_iv_size(cipher);
     }
-    enc_method = method;
+    ss->enc_method = method;
 }
 
-int enc_init(const char *pass, const char *method)
+int enc_init(shadowsocks_t *ss, const char *pass, const char *method)
 {
     int m = TABLE;
     if (method != NULL) {
@@ -749,9 +563,21 @@ int enc_init(const char *pass, const char *method)
         }
     }
     if (m == TABLE) {
-        enc_table_init(pass);
+        enc_table_init(ss, pass);
     } else {
-        enc_key_init(m, pass);
+        enc_key_init(ss, m, pass);
     }
     return m;
 }
+
+
+int global_init(void)
+{
+    /** 如果这两种method，需要初始化sodium
+     * method == SALSA20 || method == CHACHA20 **/
+    if (sodium_init() == -1) {
+        FATAL("Failed to initialize sodium");
+    }
+    return 0;
+}
+
